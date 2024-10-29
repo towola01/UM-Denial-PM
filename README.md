@@ -1,2 +1,2 @@
 # UM-Denial-PM
-Predictive model trained on EHR data to determine triage insurance denials
+Predictive model trained on EHR data to triage insurance denials
