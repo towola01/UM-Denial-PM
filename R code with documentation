@@ -1,0 +1,586 @@
+Utilization Management Denial Predictive Model
+Timothy Owolabi MD, M.S., FAAFP
+
+# Required packages----------------------------------------------------------------------------------------------------------
+
+library(tidyverse)
+library(flexmix)
+library(lessR)
+library(pROC)
+library(aod)
+library(tidymodels)
+library(glmnet)
+library(mlr)
+library(xgboost)
+library(GGally)
+library(caret)
+library(patchwork)
+library(tm)
+library(vip)
+library(fastDummies)
+library(janitor)
+library(shiny)
+library(kernlab)
+library(stacks)
+library(tictoc)
+library(parallel)
+library(parallelMap)
+
+# Data Overview-------------------------------------------------------------------------------------------------------------------
+
+## Data Pre-processing
+3 EPIC Slicer Dicer models (Clinical Notes, Encounters, Bed Nights)  were used to generate the data on features of interest.
+Patient identifiers were included to be used as table keys for data joins.
+Observations with missing fields were removed.  Categorical variables were classified as factor variables.
+The outcome variable (appeal outcome) and all factor variables were one-hot encoded/dummy coded.
+The final, pre-processed data set was split 90:10 into training and test data sets.  
+The following variables not used as model features were removed prior to model training: Encounter_CSN, Encounter_Date, MRN, Name.
+
+# Clean data-----------------------------------------------------------------------------------------------------------------------
+
+denial_pm_clean <- denial_data1 %>%
+  select(!c(Encounter_CSN,MRN,Encounter_Date,Name)) %>%
+  mutate(Outcome= ifelse(UM_Outcome== "Denial Overturned", 1,0),
+         Outcome= as.integer(Outcome),
+         Financial_Class= as.factor(Financial_Class),
+         Payer= as.factor(Payer),
+         Sex= as.factor(Sex),
+         Marital_Status= as.factor(Marital_Status),
+         Location= as.factor(Location),
+         Admission_Source= as.factor(Admission_Source),
+         Cancer_Patient= as.integer(Cancer_Patient),
+         PA= as.factor(PA),
+         SmartList= as.factor(SmartList)) %>%
+  select(-UM_Outcome) %>%
+  clean_names()
+
+# Split data into training and test data-----------------------------------------------------------------------------------------------------------------------------
+set.seed(99)
+split_denial <- denial_pm_clean %>%
+  rsample::initial_split(prop = 0.9,
+                         strata = outcome) # 90/10 split
+Train_denial <- training(split_denial)
+Test_denial <- testing(split_denial)
+split_denial
+
+# Baseline Accuracy----------------------------------------------------------------------------------------------------------------------------------------------------
+
+A best practice for assessing the performance a machine learning classification model is to establish a baseline against which the model will be compared.
+If a predictive model chooses the outcome that occurs most often for its predictions, the accuracy would always be equal to the proportion of that outcome in any new data set.
+This proportion will be defined as the *baseline accuracy* and will be the threshold a model should exceed.
+
+# Training data-----------------------------------------------------------------------------------------------------------------------------------------------------------
+## Counts of class members
+trainlab_ct <- Train_denial %>%
+  group_by(outcome) %>% 
+  count()
+## Proportions of training class members
+train_data <- tibble(outcome= c("0","1"),
+       Train_Data_Prop= as.vector(round(prop.table(trainlab_ct$n),2))) %>%
+  mutate(outcome= as.integer(outcome))
+trainlab_ct %>% full_join(train_data, by= "outcome")
+## Store baseline accuracy object
+train_base_acc <- as.numeric(train_data %>% filter(outcome== "1") %>% select(Train_Data_Prop))
+
+# Test data----------------------------------------------------------------------------------------------------------------------------------------------------------------------
+## Counts of class members
+testlab_ct <- Test_denial %>%
+  group_by(outcome) %>% 
+  count()
+## Proportions of test class members
+test_data <- tibble(outcome= c("0","1"),
+       Test_Data_Prop= as.vector(round(prop.table(testlab_ct$n),2))) %>%
+  mutate(outcome= as.integer(outcome))
+testlab_ct %>% full_join(test_data, by= "outcome")
+## Store baseline accuracy object
+test_base_acc <- as.numeric(test_data %>% filter(outcome== "1") %>% select(Test_Data_Prop))
+
+
+# Feature Engineering-------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+## Clinical Concept Creation for Clinical Feature Search
+The following clinical concepts were created based on commonly occurring diagnoses in the "Diagnosis" variable from the Encounters models:
+Ambulatory dysfunction, Weakness and deconditioning, Mental health, Altered mental status, Congestive heart failure, Diabetes mellitus,
+Coronary artery disease, Chronic Obstructive Pulmonary Disease, Respiratory Failure, Atrial fibrillation, Anemia,  Kidney disease, Hemodialysis,
+Chest pain, Dehyration, Fever, Syncope, Nausea Vomitting & Diarrhea, Vertigo, Cellulitis, Abscess, Urinary tract infection, Pneumonia,
+Severe infection, Pancreatitis, Gastrointestinal bleeding, Transient ischemic attack, Covid-19 infection, Cerebral vascular accident,
+Severe central nervous system issue.
+
+
+## Create Dx search strings--------------------------------------------------------------------------------------------------------------------------------------------------------
+amb_dysf <- c("back pain","low back pain","sciatica","ambulatory dysfunction","lumbar spondylosis","fall","osteoarthritis","compression fracture","lumbar radicular pain","radiculopathy","chronic pain","post laminectomy syndrome","wheelchair","falls","Ataxic gait","Ataxia","acute ataxia","Dizziness","Gait instability")
+weakness_decond <-c("generalized weakness","weakness","malnutrition","unable to care for self","physical deconditioning")
+mental_health <- c("psychiatric","psychotic","anxiety","ptsd","bipolar","depression","depressed","depressive","catatonia","suicidal ideation","alcohol abuse")
+AMS <- c("delirium","altered mental status","cognitive impairment","alzheimer's dementia","dementia","aggressive behavior","acute metabolic encephalopathy","encephalopathy","cognitive decline","Confusion")
+CHF <- c("congestive heart failure","heart failure","systolic heart failure","diastolic heart failure","hfref","hf","chf","pulmonary edema","pulmonary hypertension")
+DM <- c("type 2 diabetes mellitus","diabetes mellitus","diabetes","diabetic","hyperglycemia","hyperosmolar hyperglycemic state")
+CAD <- c("cabg","coronary artery disease","coronary bypass graft","angina","cad","nstemi","non-ST elevated myocardial infarction","cardiovascular stress test abnormal","acs","acute coronary syndrome","atherosclerosis of native coronary artery","elevated troponin")
+COPD <- c("copd", "acute exacerbation of chronic obstructive pulmonary disease","chronic obstructive pulmonary disease, unspecified","asthma-COPD overlap syndrome","acute bronchitis","asthma exacerbation in COPD","copd exacerbation","chronic bronchitis")
+resp_fail <- c("acute respiratory failure with hypoxia","acute hypoxemic respiratory failure", "hypoxia","hypoxemia","hypercarbia","acute respiratory distress", "acute on chronic respiratory failure with hypoxia","Respiratory failure with hypercapnia",
+"Acute respiratory failure with hypoxemia", "chronic respiratory failure with hypoxia and hypercapnia","acute on chronic respiratory failure with hypercapnia","chronic hypercapnic respiratory failure")
+afib <- c("atrial fibrillation","atrial flutter")
+anemia <- c("anemia")
+Kidney_dx <- c("chronic kidney disease","ckd","acute kidney injury","aki","Hydronephrosis","kidney","Acute renal failure","ureteral","end stage renal disease","esrd","acute renal failure","renal failure","kidney disease","nephrostomy",
+"nephropathy","Nephrolithiasis","Renal insufficiency")
+dialysis <- c("hemodialysis","dialysis")
+CP <- c("chest pain")
+dehyration <- c("dehydration","hypovolemia","hypotension","Hypokalemia","Hyponatremia","prerenal azotemia","acute gastroenteritis")
+fever <- c("fever","febrile")
+syncope <- c("syncope","near syncope","orthostatic hypotension","vertigo")
+NVD <- c("nausea vomiting and diarrhea","nausea","vomiting","diarrhea","hyperemesis gravidarum")
+vertigo <- c("dizziness","vestibular dysfunction","lightheadedness","acute ataxia")
+cellulitis <- c("cellulitis of","cellulitis","cellulitis and abscess","wound cellulitis","leg cellulitis","arm cellulitis","wound infection","facial cellulitis")
+abscess <- c("abscess of","and abscess","abscess,")
+uti <- c("urinary tract infection","acute cystitis","Pyelonephritis")
+PNA <- c("pneumonia")
+severe_inf <- c("osteomyelitis","sepsis","severe sepsis","septicemia","bacteremia","septic shock","fournier's gangrene","gangrene of","neutropenia"," with gangrene","localized peritonitis","perforated appendicitis")
+pancreatitis <- c("acute pancreatitis","unspecified pancreatitis","Alcohol-induced acute pancreatitis","Acute on chronic pancreatitis","Acute recurrent pancreatitis","Acute biliary pancreatitis","Gallstone pancreatitis")
+gi_bleed <- c("upper giI bleed","hematemesis","coffee ground emesis","gastrointestinal hemorrhage","melena","blood loss","rectal bleeding","lower gi bleed"," lower GI bleeding","bright red blood per rectum")
+tia <- c("transient ischemic attack","Stroke-like symptoms")
+covid19 <- c("COVID-19","SARS-CoV-2")
+cva <- c("Cerebrovascular accident","CVA", "Acute CVA","Acute stroke","cerebral AD arteriopathy w infarcts and leukoencephalopathy","hemiparesis","Cerebellar stroke","embolism of cerebral artery","Acute ischemic right posterior cerebral artery","Stroke of right basal ganglia")
+severe_cns <- c("Cerebral edema","Neoplasm causing mass effect","Cerebral palsy","Seizure","Seizures","Spastic quadriplegic","Demyelinating disease of central nervous system")
+
+## Find clinical features within Diagnosis variable and dummy code for every observation--------------------------------------------------------------------------------------------------
+Train_denial1 <- Train_denial %>% 
+  mutate(outcome= as.factor(outcome),
+         Dx_split = strsplit(diagnosis,"\n"),
+         Mobility_problems= as.integer(sapply(Dx_split, function(x) any(grepl(paste(amb_dysf,collapse = "|"),x)))),
+         Weakness_decond= as.integer(sapply(Dx_split, function(x) any(grepl(paste(weakness_decond,collapse = "|"),x)))),
+         Mental_health= as.integer(sapply(Dx_split, function(x) any(grepl(paste(mental_health,collapse = "|"),x)))),
+         AMS= as.integer(sapply(Dx_split, function(x) any(grepl(paste(AMS,collapse = "|"),x)))),
+         CHF= as.integer(sapply(Dx_split, function(x) any(grepl(paste(CHF,collapse = "|"),x)))),
+         Diabetes= as.integer(sapply(Dx_split, function(x) any(grepl(paste(DM,collapse = "|"),x)))),
+         CAD= as.integer(sapply(Dx_split, function(x) any(grepl(paste(CAD,collapse = "|"),x)))),
+         COPD= as.integer(sapply(Dx_split, function(x) any(grepl(paste(COPD,collapse = "|"),x)))),
+         Resp_fail= as.integer(sapply(Dx_split, function(x) any(grepl(paste(resp_fail,collapse = "|"),x)))),
+         Afib= as.integer(sapply(Dx_split, function(x) any(grepl(paste(afib,collapse = "|"),x)))),
+         Anemia= as.integer(sapply(Dx_split, function(x) any(grepl(paste(anemia,collapse = "|"),x)))),
+         Kidney_dx= as.integer(sapply(Dx_split, function(x) any(grepl(paste(Kidney_dx,collapse = "|"),x)))),
+         Dialysis= as.integer(sapply(Dx_split, function(x) any(grepl(paste(dialysis,collapse = "|"),x)))),
+         Chest_pain= as.integer(sapply(Dx_split, function(x) any(grepl(paste(CP,collapse = "|"),x)))),
+         Fluids_lytes= as.integer(sapply(Dx_split, function(x) any(grepl(paste(dehyration,collapse = "|"),x)))),
+         Fever= as.integer(sapply(Dx_split, function(x) any(grepl(paste(fever,collapse = "|"),x)))),
+         Syncope= as.integer(sapply(Dx_split, function(x) any(grepl(paste(syncope,collapse = "|"),x)))),
+         NVD= as.integer(sapply(Dx_split, function(x) any(grepl(paste(NVD,collapse = "|"),x)))),
+         Dizziness_vertigo= as.integer(sapply(Dx_split, function(x) any(grepl(paste(vertigo,collapse = "|"),x)))),
+         Cellulitis= as.integer(sapply(Dx_split, function(x) any(grepl(paste(cellulitis,collapse = "|"),x)))),
+         Abscess= as.integer(sapply(Dx_split, function(x) any(grepl(paste(abscess,collapse = "|"),x)))),
+         UTI= as.integer(sapply(Dx_split, function(x) any(grepl(paste(uti,collapse = "|"),x)))),
+         PNA= as.integer(sapply(Dx_split, function(x) any(grepl(paste(PNA,collapse = "|"),x)))),
+         GI_bleed= as.integer(sapply(Dx_split, function(x) any(grepl(paste(gi_bleed,collapse = "|"),x)))),
+         TIA= as.integer(sapply(Dx_split, function(x) any(grepl(paste(tia,collapse = "|"),x)))),
+         severe_inf= as.integer(sapply(Dx_split, function(x) any(grepl(paste(severe_inf,collapse = "|"),x)))),
+         covid_19= as.integer(sapply(Dx_split, function(x) any(grepl(paste(covid19,collapse = "|"),x)))),
+         CVA= as.integer(sapply(Dx_split, function(x) any(grepl(paste(cva,collapse = "|"),x)))),
+         severe_cns= as.integer(sapply(Dx_split, function(x) any(grepl(paste(severe_cns,collapse = "|"),x)))),
+         Dx_split= NULL) %>%
+  select(-diagnosis) %>%
+  clean_names()
+
+Test_denial1 <- Test_denial %>% 
+  mutate(outcome= as.factor(outcome),
+         Dx_split = strsplit(diagnosis,"\n"),
+         Mobility_problems= as.integer(sapply(Dx_split, function(x) any(grepl(paste(amb_dysf,collapse = "|"),x)))),
+         Weakness_decond= as.integer(sapply(Dx_split, function(x) any(grepl(paste(weakness_decond,collapse = "|"),x)))),
+         Mental_health= as.integer(sapply(Dx_split, function(x) any(grepl(paste(mental_health,collapse = "|"),x)))),
+         AMS= as.integer(sapply(Dx_split, function(x) any(grepl(paste(AMS,collapse = "|"),x)))),
+         CHF= as.integer(sapply(Dx_split, function(x) any(grepl(paste(CHF,collapse = "|"),x)))),
+         Diabetes= as.integer(sapply(Dx_split, function(x) any(grepl(paste(DM,collapse = "|"),x)))),
+         CAD= as.integer(sapply(Dx_split, function(x) any(grepl(paste(CAD,collapse = "|"),x)))),
+         COPD= as.integer(sapply(Dx_split, function(x) any(grepl(paste(COPD,collapse = "|"),x)))),
+         Resp_fail= as.integer(sapply(Dx_split, function(x) any(grepl(paste(resp_fail,collapse = "|"),x)))),
+         Afib= as.integer(sapply(Dx_split, function(x) any(grepl(paste(afib,collapse = "|"),x)))),
+         Anemia= as.integer(sapply(Dx_split, function(x) any(grepl(paste(anemia,collapse = "|"),x)))),
+         Kidney_dx= as.integer(sapply(Dx_split, function(x) any(grepl(paste(Kidney_dx,collapse = "|"),x)))),
+         Dialysis= as.integer(sapply(Dx_split, function(x) any(grepl(paste(dialysis,collapse = "|"),x)))),
+         Chest_pain= as.integer(sapply(Dx_split, function(x) any(grepl(paste(CP,collapse = "|"),x)))),
+         Fluids_lytes= as.integer(sapply(Dx_split, function(x) any(grepl(paste(dehyration,collapse = "|"),x)))),
+         Fever= as.integer(sapply(Dx_split, function(x) any(grepl(paste(fever,collapse = "|"),x)))),
+         Syncope= as.integer(sapply(Dx_split, function(x) any(grepl(paste(syncope,collapse = "|"),x)))),
+         NVD= as.integer(sapply(Dx_split, function(x) any(grepl(paste(NVD,collapse = "|"),x)))),
+         Dizziness_vertigo= as.integer(sapply(Dx_split, function(x) any(grepl(paste(vertigo,collapse = "|"),x)))),
+         Cellulitis= as.integer(sapply(Dx_split, function(x) any(grepl(paste(cellulitis,collapse = "|"),x)))),
+         Abscess= as.integer(sapply(Dx_split, function(x) any(grepl(paste(abscess,collapse = "|"),x)))),
+         UTI= as.integer(sapply(Dx_split, function(x) any(grepl(paste(uti,collapse = "|"),x)))),
+         PNA= as.integer(sapply(Dx_split, function(x) any(grepl(paste(PNA,collapse = "|"),x)))),
+         GI_bleed= as.integer(sapply(Dx_split, function(x) any(grepl(paste(gi_bleed,collapse = "|"),x)))),
+         TIA= as.integer(sapply(Dx_split, function(x) any(grepl(paste(tia,collapse = "|"),x)))),
+         severe_inf= as.integer(sapply(Dx_split, function(x) any(grepl(paste(severe_inf,collapse = "|"),x)))),
+         covid_19= as.integer(sapply(Dx_split, function(x) any(grepl(paste(covid19,collapse = "|"),x)))),
+         CVA= as.integer(sapply(Dx_split, function(x) any(grepl(paste(cva,collapse = "|"),x)))),
+         severe_cns= as.integer(sapply(Dx_split, function(x) any(grepl(paste(severe_cns,collapse = "|"),x)))),
+         Dx_split= NULL) %>%
+  select(-diagnosis) %>%
+  clean_names()
+
+## Correct order of outcome variable so training and testing data match---------------------------------------------------------------------------------------------------
+Train_denial1$outcome <- factor(Train_denial1$outcome, levels = c("1","0"))
+Test_denial1$outcome <- factor(Test_denial1$outcome, levels = c("1","0"))
+
+# Model Descriptions-------------------------------------------------------------------------------------------------------------------------------------------------
+
+## Lasso Logistic regression with regularization
+Logistic regression is a technique that uses a sigmoid function to predict a binary outcome.
+Regularization is a technique that penalizes the model during training if it  captures too much noise
+Lasso regularization drops variables that don't add much to the model.
+
+## Ridge Logistic regression with regularization
+Ridge regression  also penalizes the model during training if the algorithm captures too much noise.
+In contrast to lasso regression, ridge regression retains all variables.
+
+## ElasticNet Logistic regression with regularization
+ElasticNet regression attempts to find the optimal combination of lasso regression and ridge regression.
+
+## Boosted Decision Tree Model
+A decision tree (DT) has a structure similar to a branching tree.
+A question is asked at a *node* of the tree, and the answer determines which branch one follows.
+The nodes represent the features of the dataset, and the branches represent the algorithm decision rules.
+Terminal nodes or "*leaf nodes*" contain the model output.
+DT model performance will be improved through a process called **boosting** where some parts of the algorithm learn from mistakes made by other parts.
+
+## Support Vector Machine Model
+The Support Vector Model  finds an optimal linear hyperplane that separates the classes.
+A hyperplane is a surface that has one less dimension than there are variables in the data set.
+This approach is one of the most computationally intensive.
+
+## MLP Neural Network
+A multilayer perceptron (MLP) is a type of neural network composed of multiple layers of "neurons" that are all interconnected.
+Each neuron receives inputs from the previous layer and generates an output to the following layer.
+These algorithms are computationally intensive and are prone to overfitting.
+
+# Model training-------------------------------------------------------------------------------------------------------------------------------------------------------------------
+The tidmodels recipe package was utilized to train all models.  Any existing hyperparameters were tuned as part of each model's tidymodels workflow.
+A model training step was also included to remove variables that contain only a single value and thus have no variance.
+Additional features were created within the tidymodels framework by using the step_interact() function to create pairwise interactions between variables.
+Many dozens of feature interactions were interatively added and removed depending on whether there was improvement in model performance.
+
+**This approach was not practical for the most computationally intensive models.**
+
+Each candidate predictive model was trained through a resampling technique called cross validation.
+The data was randomly split into 10 subsets of the same size.  One subset was chosen for validation, and each model was trained on the remaining 9 subsets.
+Each of the 10 subsets were used only once for validation. The mean of the 10 generated results is calculated to produce a single estimate.
+This process is called 10-fold cross validation and increases the likelihood that a model will generalize it's predictions.
+
+
+## Lasso Model--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# Recipe
+denialRec1 <- recipe(outcome~ .,data=Train_denial1) %>%
+  step_dummy(all_nominal_predictors(), one_hot = T) %>% # Dummy code factor variables
+  step_zv(all_predictors()) %>%                       # Removes variables with no variance
+  step_normalize(all_numeric_predictors()) %>%
+  step_interact(terms = ~ starts_with("chf"):starts_with("admission_source_")) %>%
+  step_interact(terms = ~ chf:starts_with("svi_")) %>%
+  step_interact(terms = ~ chf:starts_with("payer_")) %>%
+  step_interact(terms = ~ chf:starts_with("smart_list_")) %>%
+  step_interact(terms = ~ los:starts_with("location_")) %>%
+  step_interact(terms = ~ age:starts_with("payer_")) %>%
+  step_interact(terms = ~ ams:starts_with("age")) %>%
+  step_interact(terms = ~ starts_with("pa_"):chf)
+
+# Model- Binary Logistic regression with regularization-----------------------------------
+lasso_Model1 <-logistic_reg(penalty=tune(), mixture=1) %>%
+set_engine('glmnet') %>%
+set_mode("classification")
+
+# Workflow--------------------------------------------------------------------------------
+denialmodWF1 <- workflow() %>%
+add_recipe(denialRec1) %>%
+add_model(lasso_Model1)
+
+# Tuning Grid set up----------------------------------------------------------------------
+# stratified splitting to keep=proportions of Outcome values across folds in tuning grid
+set.seed(100) # makes splits repeatable
+lassoFolds <- Train_denial1 %>%
+  rsample::vfold_cv(v=10, strata = "outcome")
+
+set.seed(22) # be sure you can get the same grid
+lassoGrid1 <- grid_regular(penalty(), levels=5)
+
+denialMod1Res <- tune_grid(denialmodWF1, # Workflow
+                           resamples = lassoFolds,
+                           grid = lassoGrid1
+                           )
+# Best Model------------------------------------------------------------------------------
+denialBestParams <- denialMod1Res %>%
+select_best("accuracy")
+
+# Finalize workflow-----------------------------------------------------------------------
+denialModBest <- denialmodWF1 %>%
+finalize_workflow(denialBestParams) %>%
+fit(Train_denial1)
+
+saveRDS(denialModBest, file = "denialModBest.rds")
+
+
+
+## Ridge Model-----------------------------------------------------------------------------------------------------------------------------------------------------------------
+# Recipe
+denialRec2 <- recipe(outcome~ .,data=Train_denial1) %>%
+  step_dummy(all_nominal_predictors(), one_hot = T) %>% # Dummy code factor variables
+  step_zv(all_predictors()) %>%                       # Removes variables with no variance
+  step_normalize(all_numeric_predictors()) %>%
+  step_interact(terms = ~ starts_with("chf"):starts_with("admission_source_")) %>%
+  step_interact(terms = ~ chf:starts_with("age")) %>%
+  step_interact(terms = ~ los:starts_with("age")) %>% 
+  step_interact(terms = ~ chf:starts_with("svi_")) %>%
+  step_interact(terms = ~ chf:starts_with("sex_")) %>%
+  step_interact(terms = ~ los:starts_with("admission_source_")) %>%
+  step_interact(terms = ~ los:starts_with("location_")) %>%
+  step_interact(terms = ~ age:starts_with("location_")) %>%
+  step_interact(terms = ~ age:starts_with("marital_status"))
+  
+# Model- Binary Logistic regression with regularization-----------------------------------
+ridge_Model <-logistic_reg(penalty=tune(), mixture=0) %>%
+set_engine('glmnet') %>%
+set_mode("classification")
+
+# Workflow--------------------------------------------------------------------------------
+denialmodWF2 <- workflow() %>%
+add_recipe(denialRec2) %>%
+add_model(ridge_Model)
+
+# Tuning Grid set up----------------------------------------------------------------------
+# stratified splitting to keep=proportions of Outcome values across folds in tuning grid
+set.seed(101) # makes splits repeatable
+ridgeFolds <- Train_denial1 %>%
+  rsample::vfold_cv(v=10, strata = "outcome")
+
+set.seed(21) # be sure you can get the same grid
+ridgeGrid1 <- grid_regular(penalty(), levels=5)
+
+denialMod1Res2 <- tune_grid(denialmodWF2, # Workflow
+                           resamples = ridgeFolds,
+                           grid = ridgeGrid1
+                           )
+# Best Model------------------------------------------------------------------------------
+denialBestParams2 <- denialMod1Res2 %>%
+select_best("accuracy")
+
+# Finalize workflow-----------------------------------------------------------------------
+denialModBest2 <- denialmodWF2 %>%
+finalize_workflow(denialBestParams2) %>%
+fit(Train_denial1)
+
+saveRDS(denialModBest2, file = "denialModBest2.rds")
+
+
+
+## ElasticNet Model----------------------------------------------------------------------------------------------------------------------------------------------------------
+# Recipe
+eNetRec <- recipe(outcome~ .,data=Train_denial1) %>%
+  step_dummy(all_nominal_predictors(), one_hot = T) %>% # Dummy code factor variables
+  step_zv(all_predictors()) %>%
+  step_normalize(all_numeric_predictors()) %>%
+  step_interact(terms = ~ starts_with("chf"):starts_with("admission_source_")) %>%
+  step_interact(terms = ~ chf:starts_with("age")) %>%
+  step_interact(terms = ~ los:starts_with("age")) %>%
+  step_interact(terms = ~ chf:starts_with("location_")) %>%
+  step_interact(terms = ~ los:starts_with("admission_source_")) %>%
+  step_interact(terms = ~ los:starts_with("location_")) %>%
+  step_interact(terms = ~ los:starts_with("sex_")) %>%
+  step_interact(terms = ~ age:starts_with("payer_")) %>%
+  step_interact(terms = ~ age:starts_with("sex_")) %>%
+  step_interact(terms = ~ age:starts_with("location_"))
+
+# Model- Binary Logistic regression with regularization-----------------------------------
+eNetModel <-logistic_reg(penalty=tune(), mixture=tune()) %>%
+set_engine('glmnet') %>%
+set_mode("classification")
+
+# Workflow--------------------------------------------------------------------------------
+eNetWorkflow <- workflow() %>%
+add_recipe(eNetRec) %>%
+add_model(eNetModel)
+
+# Tuning Grid set up----------------------------------------------------------------------
+# stratified splitting to keep=proportions of Outcome values across folds in tuning grid
+set.seed(100) # makes splits repeatable
+eNetFolds <- Train_denial1 %>%
+  rsample::vfold_cv(v=10, strata = "outcome")
+
+set.seed(22) # be sure you can get the same grid
+eNetGrid <- grid_regular(penalty(),mixture(), levels=5)
+
+eNetModRes <- tune_grid(eNetWorkflow,
+                           resamples = eNetFolds,
+                           grid = eNetGrid
+                           )
+# Best Model------------------------------------------------------------------------------
+eNetBestParams <- eNetModRes %>%
+select_best("accuracy")
+
+# Finalize workflow-----------------------------------------------------------------------
+eNetModBest <- eNetWorkflow %>%
+finalize_workflow(eNetBestParams) %>%
+fit(Train_denial1)
+
+saveRDS(eNetModBest, file = "eNetModBest.rds")
+saveRDS(eNetBestParams, file = "eNetBestParams.rds")
+
+
+
+## Support Vector Machine Model------------------------------------------------------------------------------------------------------------------------------------------
+# Recipe
+svmRec <- recipe(outcome~ .,data=Train_denial1) %>%
+  step_dummy(all_nominal_predictors(), one_hot = T) %>% # Dummy code factor variables
+  step_zv(all_predictors()) %>%
+  step_normalize(all_numeric_predictors()) %>%
+  step_interact(terms = ~ chf:starts_with("svi_")) %>%
+  step_interact(terms = ~ chf:starts_with("payer_")) %>%
+  step_interact(terms = ~ los:starts_with("location_")) %>%
+  step_interact(terms = ~ age:starts_with("payer_"))
+
+# Model- Binary Logistic regression with regularization-----------------------------------
+svmModel <- svm_rbf(cost = tune(), rbf_sigma = tune()) %>%
+  set_engine("kernlab") %>%
+  set_mode("classification")
+
+# Workflow--------------------------------------------------------------------------------
+svmWorkflow <- workflow() %>%
+add_recipe(svmRec) %>%
+add_model(svmModel)
+
+# Tuning Grid set up----------------------------------------------------------------------
+# stratified splitting to keep=proportions of Outcome values across folds in tuning grid
+set.seed(101) # makes splits repeatable
+svmFolds <- Train_denial1 %>%
+  rsample::vfold_cv(v=10, strata = "outcome")
+
+set.seed(25) # be sure you can get the same grid
+svmGrid <- grid_regular(cost(),rbf_sigma(), levels=5)
+
+svmModRes <- tune_grid(svmWorkflow,
+                           resamples = svmFolds,
+                           grid = svmGrid
+                           )
+# Best Model------------------------------------------------------------------------------
+svmBestParams <- svmModRes %>%
+select_best("accuracy")
+
+# Finalize workflow-----------------------------------------------------------------------
+svmModBest <- svmWorkflow %>%
+finalize_workflow(svmBestParams) %>%
+fit(Train_denial1)
+
+saveRDS(svmModBest, file = "svmModBest.rds")
+
+
+
+## Neural Network------------------------------------------------------------------------------------------------------------------------------------------------------------
+# Recipe
+NNRec <- recipe(outcome~ .,data=Train_denial1) %>%
+  step_dummy(all_nominal_predictors(), one_hot = T) %>% # Dummy code factor variables
+  step_zv(all_predictors()) %>%
+  step_normalize(all_numeric_predictors())
+
+# Model- Multilayer Perceptron------------------------------------------------------------
+nNet_Model <-
+   mlp(hidden_units = tune(), penalty = tune(), epochs = tune()) %>%
+   set_engine("nnet", MaxNWts = 2600) %>%
+   set_mode("classification")
+
+# Workflow--------------------------------------------------------------------------------
+NNWorkflow <- workflow() %>%
+add_recipe(NNRec) %>%
+add_model(nNet_Model)
+
+# Tuning Grid set up----------------------------------------------------------------------
+tic()
+set.seed(102) # makes splits repeatable
+NNFolds <- Train_denial1 %>%
+  rsample::vfold_cv(v=10, strata = "outcome")
+
+set.seed(26) # be sure you can get the same grid
+NNGrid <- grid_regular(hidden_units(),penalty(),epochs(), levels=5)
+
+NNModRes <- tune_grid(NNWorkflow,
+                      resamples = NNFolds,
+                      grid = NNGrid
+                      )
+toc()
+# Best Model------------------------------------------------------------------------------
+NNBestParams <- NNModRes %>%
+select_best("accuracy")
+
+# Finalize workflow-----------------------------------------------------------------------
+NNModBest <- NNWorkflow %>%
+finalize_workflow(NNBestParams) %>%
+fit(Train_denial1)
+
+saveRDS(NNModBest, file = "NNModBest.rds")
+
+
+
+# Boosted Tree Random Forest Model-----------------------------------------------------------------------------------------------------------------------------------------------
+# Learner
+boostMod <- boost_tree(trees=tune(), min_n=tune(), mtry=tune(), tree_depth=tune(),
+                       learn_rate=tune()) %>%
+set_mode("classification") %>%
+set_engine("xgboost")
+# Recipe--------------------------------------------------------------------------------
+boostrec <- recipes::recipe(outcome~.,data=Train_denial1) %>%
+  step_dummy(all_nominal_predictors(), one_hot = T) %>% # Dummy code factor variables
+  step_zv(all_numeric()) %>%
+  step_normalize(all_numeric_predictors()) %>%
+  step_interact(terms = ~ chf:starts_with("svi_")) %>%
+  step_interact(terms = ~ chf:starts_with("payer_")) %>%
+  step_interact(terms = ~ chf:starts_with("smart_list_")) %>%
+  step_interact(terms = ~ chf:starts_with("sex_")) %>%
+  step_interact(terms = ~ chf:starts_with("age")) %>%
+  step_interact(terms = ~ chf:starts_with("location_")) %>%
+  step_interact(terms = ~ los:starts_with("location_")) %>%
+  step_interact(terms = ~ los:starts_with("age")) %>%
+  step_interact(terms = ~ los:starts_with("admission_source_")) %>%
+  step_interact(terms = ~ age:starts_with("payer_")) %>%
+  step_interact(terms = ~ ams:starts_with("age")) %>%
+  step_interact(terms = ~ los:starts_with("sex_")) %>%
+  step_interact(terms = ~ age:starts_with("location_")) %>%
+  step_interact(terms = ~ age:starts_with("marital_status"))
+  
+# Workflow------------------------------------------------------------------------------
+boostWF <- workflow(boostrec, boostMod)
+# Cross-validation specs----------------------------------------------------------------
+set.seed(20)
+treeFolds5 <- vfold_cv(Train_denial1, v= 10) # 5-fold cv
+# Tuning grid---------------------------------------------------------------------------
+boostinggrid <- expand.grid(
+min_n=c(5,10), # No data points needed to split node further (default 10 for a classifier)
+trees=c(500,750), # default 500
+mtry=c(4,6,8), # No (or proportion) of predictors to be randomly sampled at each split
+tree_depth=c(5,7,10), # maximum depth of the tree
+learn_rate=c(0.001,0.01,0.1))
+# Metrics---------------------------------------------------------------------------------
+measure <- mlr::auc
+# Tuning parameters-----------------------------------------------------------------------
+set.seed(75757)
+boost_tune <-
+tune_grid(
+boostWF, # workflow, inc model, recipes
+resamples = treeFolds5,
+grid = boostinggrid, # hyperparam value grid
+measures = list(acc,measure), #Includes accuracy (acc) & (auc)
+control_grid(save_pred = TRUE,
+parallel_over = "everything",
+save_workflow = TRUE)
+)
+# Best Decision tree hyperparameters------------------------------------------------------
+best_acc <- show_best(boost_tune, metric= "accuracy")
+
+
+# Challenges---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+The most computationally intensive models (SVM, Random forest, and NN) performed the poorest.  
+One challenge for which there was no apparently effective solution was the imbalance between outcomes, i.e., overturned denials vs those upheld on appeal.
+Similar to Araújo et al. (2016), I applied random over-sampling to the training data.
+The ROSE package in R was used to generate additional observations by randomly duplicating upheld appeal observations such that the final larger data set had equal overturned denials and upheld denials.
+This technique resulted in worse performance of the less computationally intensive models.
+I did not train the balanced data set on any of the more computationally intensive models due to the cost.
+For example, tuning the hyperparameters for the neural network took over 2 hours.
+Although support vector machine and neural network models can handle more complexity and higher dimensional data, so far, their performance does not justify the computational cost.
+Another challenge stems from the importance of length of stay with the best model.
+Denied hospitalizations with a longer length of stay are more likely to be assigned a higher probability of overturn on appeal.
+Some of the longest hospital stays are due to placement issues, but the model has not been able to distinguish a long length of stay due to illness versus discharge barriers.
+The resulting false positives must be identified manually when reviewing the model predictions.
+
+
+
