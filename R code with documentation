@@ -108,38 +108,83 @@ Severe central nervous system issue.
 
 
 ## Create Dx search strings--------------------------------------------------------------------------------------------------------------------------------------------------------
-amb_dysf <- c("back pain","low back pain","sciatica","ambulatory dysfunction","lumbar spondylosis","fall","osteoarthritis","compression fracture","lumbar radicular pain","radiculopathy","chronic pain","post laminectomy syndrome","wheelchair","falls","Ataxic gait","Ataxia","acute ataxia","Dizziness","Gait instability")
+amb_dysf <- c("back pain","low back pain","sciatica","ambulatory dysfunction","lumbar spondylosis","fall","osteoarthritis",
+"compression fracture","lumbar radicular pain","radiculopathy","chronic pain","post laminectomy syndrome","wheelchair",
+"falls","Ataxic gait","Ataxia","acute ataxia","Dizziness","Gait instability"
+)
 weakness_decond <-c("generalized weakness","weakness","malnutrition","unable to care for self","physical deconditioning")
-mental_health <- c("psychiatric","psychotic","anxiety","ptsd","bipolar","depression","depressed","depressive","catatonia","suicidal ideation","alcohol abuse")
-AMS <- c("delirium","altered mental status","cognitive impairment","alzheimer's dementia","dementia","aggressive behavior","acute metabolic encephalopathy","encephalopathy","cognitive decline","Confusion")
-CHF <- c("congestive heart failure","heart failure","systolic heart failure","diastolic heart failure","hfref","hf","chf","pulmonary edema","pulmonary hypertension")
-DM <- c("type 2 diabetes mellitus","diabetes mellitus","diabetes","diabetic","hyperglycemia","hyperosmolar hyperglycemic state")
-CAD <- c("cabg","coronary artery disease","coronary bypass graft","angina","cad","nstemi","non-ST elevated myocardial infarction","cardiovascular stress test abnormal","acs","acute coronary syndrome","atherosclerosis of native coronary artery","elevated troponin")
-COPD <- c("copd", "acute exacerbation of chronic obstructive pulmonary disease","chronic obstructive pulmonary disease, unspecified","asthma-COPD overlap syndrome","acute bronchitis","asthma exacerbation in COPD","copd exacerbation","chronic bronchitis")
-resp_fail <- c("acute respiratory failure with hypoxia","acute hypoxemic respiratory failure", "hypoxia","hypoxemia","hypercarbia","acute respiratory distress", "acute on chronic respiratory failure with hypoxia","Respiratory failure with hypercapnia",
-"Acute respiratory failure with hypoxemia", "chronic respiratory failure with hypoxia and hypercapnia","acute on chronic respiratory failure with hypercapnia","chronic hypercapnic respiratory failure")
-afib <- c("atrial fibrillation","atrial flutter")
-anemia <- c("anemia")
-Kidney_dx <- c("chronic kidney disease","ckd","acute kidney injury","aki","Hydronephrosis","kidney","Acute renal failure","ureteral","end stage renal disease","esrd","acute renal failure","renal failure","kidney disease","nephrostomy",
-"nephropathy","Nephrolithiasis","Renal insufficiency")
-dialysis <- c("hemodialysis","dialysis")
-CP <- c("chest pain")
-dehyration <- c("dehydration","hypovolemia","hypotension","Hypokalemia","Hyponatremia","prerenal azotemia","acute gastroenteritis")
-fever <- c("fever","febrile")
-syncope <- c("syncope","near syncope","orthostatic hypotension","vertigo")
-NVD <- c("nausea vomiting and diarrhea","nausea","vomiting","diarrhea","hyperemesis gravidarum")
-vertigo <- c("dizziness","vestibular dysfunction","lightheadedness","acute ataxia")
-cellulitis <- c("cellulitis of","cellulitis","cellulitis and abscess","wound cellulitis","leg cellulitis","arm cellulitis","wound infection","facial cellulitis")
-abscess <- c("abscess of","and abscess","abscess,")
-uti <- c("urinary tract infection","acute cystitis","Pyelonephritis")
-PNA <- c("pneumonia")
-severe_inf <- c("osteomyelitis","sepsis","severe sepsis","septicemia","bacteremia","septic shock","fournier's gangrene","gangrene of","neutropenia"," with gangrene","localized peritonitis","perforated appendicitis")
-pancreatitis <- c("acute pancreatitis","unspecified pancreatitis","Alcohol-induced acute pancreatitis","Acute on chronic pancreatitis","Acute recurrent pancreatitis","Acute biliary pancreatitis","Gallstone pancreatitis")
-gi_bleed <- c("upper giI bleed","hematemesis","coffee ground emesis","gastrointestinal hemorrhage","melena","blood loss","rectal bleeding","lower gi bleed"," lower GI bleeding","bright red blood per rectum")
-tia <- c("transient ischemic attack","Stroke-like symptoms")
-covid19 <- c("COVID-19","SARS-CoV-2")
-cva <- c("Cerebrovascular accident","CVA", "Acute CVA","Acute stroke","cerebral AD arteriopathy w infarcts and leukoencephalopathy","hemiparesis","Cerebellar stroke","embolism of cerebral artery","Acute ischemic right posterior cerebral artery","Stroke of right basal ganglia")
-severe_cns <- c("Cerebral edema","Neoplasm causing mass effect","Cerebral palsy","Seizure","Seizures","Spastic quadriplegic","Demyelinating disease of central nervous system")
+mental_health <- c("psychiatric","psychotic","anxiety","ptsd","bipolar","depression","depressed","depressive","catatonia",
+"suicidal ideation","alcohol abuse"
+)
+AMS <- c("delirium","altered mental status","cognitive impairment","alzheimer's dementia","dementia","aggressive behavior",
+"acute metabolic encephalopathy","encephalopathy","cognitive decline","Confusion"
+)
+CHF <- c("congestive heart failure","heart failure","systolic heart failure","diastolic heart failure","hfref","hf","chf",
+"pulmonary edema","pulmonary hypertension"
+)
+DM <- c("type 2 diabetes mellitus","diabetes mellitus","diabetes","diabetic","hyperglycemia","hyperosmolar hyperglycemic state"
+)
+CAD <- c("cabg","coronary artery disease","coronary bypass graft","angina","cad","nstemi","non-ST elevated myocardial infarction",
+"cardiovascular stress test abnormal","acs","acute coronary syndrome","atherosclerosis of native coronary artery","elevated troponin"
+)
+COPD <- c("copd", "acute exacerbation of chronic obstructive pulmonary disease","chronic obstructive pulmonary disease, unspecified",
+"asthma-COPD overlap syndrome","acute bronchitis","asthma exacerbation in COPD","copd exacerbation","chronic bronchitis"
+)
+resp_fail <- c("acute respiratory failure with hypoxia","acute hypoxemic respiratory failure", "hypoxia","hypoxemia","hypercarbia",
+"acute respiratory distress", "acute on chronic respiratory failure with hypoxia","Respiratory failure with hypercapnia",
+"Acute respiratory failure with hypoxemia", "chronic respiratory failure with hypoxia and hypercapnia",
+"acute on chronic respiratory failure with hypercapnia","chronic hypercapnic respiratory failure"
+)
+afib <- c("atrial fibrillation","atrial flutter"
+)
+anemia <- c("anemia"
+)
+Kidney_dx <- c("chronic kidney disease","ckd","acute kidney injury","aki","Hydronephrosis","kidney","Acute renal failure","ureteral",
+"end stage renal disease","esrd","acute renal failure","renal failure","kidney disease","nephrostomy","nephropathy","Nephrolithiasis",
+"Renal insufficiency"
+)
+dialysis <- c("hemodialysis","dialysis"
+)
+CP <- c("chest pain"
+)
+dehyration <- c("dehydration","hypovolemia","hypotension","Hypokalemia","Hyponatremia","prerenal azotemia","acute gastroenteritis"
+)
+fever <- c("fever","febrile"
+)
+syncope <- c("syncope","near syncope","orthostatic hypotension","vertigo"
+)
+NVD <- c("nausea vomiting and diarrhea","nausea","vomiting","diarrhea","hyperemesis gravidarum"
+)
+vertigo <- c("dizziness","vestibular dysfunction","lightheadedness","acute ataxia"
+)
+cellulitis <- c("cellulitis of","cellulitis","cellulitis and abscess","wound cellulitis","leg cellulitis","arm cellulitis",
+"wound infection","facial cellulitis"
+)
+abscess <- c("abscess of","and abscess","abscess,"
+)
+uti <- c("urinary tract infection","acute cystitis","Pyelonephritis"
+)
+PNA <- c("pneumonia"
+)
+severe_inf <- c("osteomyelitis","sepsis","severe sepsis","septicemia","bacteremia","septic shock","fournier's gangrene",
+"gangrene of","neutropenia"," with gangrene","localized peritonitis","perforated appendicitis"
+)
+pancreatitis <- c("acute pancreatitis","unspecified pancreatitis","Alcohol-induced acute pancreatitis",
+"Acute on chronic pancreatitis","Acute recurrent pancreatitis","Acute biliary pancreatitis","Gallstone pancreatitis"
+)
+gi_bleed <- c("upper giI bleed","hematemesis","coffee ground emesis","gastrointestinal hemorrhage","melena","blood loss",
+"rectal bleeding","lower gi bleed"," lower GI bleeding","bright red blood per rectum"
+)
+tia <- c("transient ischemic attack","Stroke-like symptoms"
+)
+covid19 <- c("COVID-19","SARS-CoV-2"
+)
+cva <- c("Cerebrovascular accident","CVA", "Acute CVA","Acute stroke","cerebral AD arteriopathy w infarcts and leukoencephalopathy",
+"hemiparesis","Cerebellar stroke","embolism of cerebral artery","Acute ischemic right posterior cerebral artery","Stroke of right basal ganglia"
+)
+severe_cns <- c("Cerebral edema","Neoplasm causing mass effect","Cerebral palsy","Seizure","Seizures","Spastic quadriplegic",
+"Demyelinating disease of central nervous system"
+)
 
 ## Find clinical features within Diagnosis variable and dummy code for every observation--------------------------------------------------------------------------------------------------
 Train_denial1 <- Train_denial %>% 
@@ -214,7 +259,7 @@ Test_denial1 <- Test_denial %>%
   select(-diagnosis) %>%
   clean_names()
 
-## Correct order of outcome variable so training and testing data match---------------------------------------------------------------------------------------------------
+## Correct order of outcome variable so training and testing data match----------------------------------------------------------------------------------------------
 Train_denial1$outcome <- factor(Train_denial1$outcome, levels = c("1","0"))
 Test_denial1$outcome <- factor(Test_denial1$outcome, levels = c("1","0"))
 
