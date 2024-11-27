@@ -104,8 +104,6 @@ Severe infection, Pancreatitis, Gastrointestinal bleeding, Transient ischemic at
 Severe central nervous system issue.
 
 
-
-
 ## Find clinical features within Diagnosis variable and dummy code for every observation--------------------------------------------------------------------------------------------------
 Train_denial1 <- Train_denial %>% 
   mutate(outcome= as.factor(outcome),
