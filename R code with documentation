@@ -60,39 +60,6 @@ Train_denial <- training(split_denial)
 Test_denial <- testing(split_denial)
 split_denial
 
-# Baseline Accuracy----------------------------------------------------------------------------------------------------------------------------------------------------
-
-A best practice for assessing the performance a machine learning classification model is to establish a baseline against which the model will be compared.
-If a predictive model chooses the outcome that occurs most often for its predictions, the accuracy would always be equal to the proportion of that outcome in any new data set.
-This proportion will be defined as the *baseline accuracy* and will be the threshold a model should exceed.
-
-# Training data-----------------------------------------------------------------------------------------------------------------------------------------------------------
-## Counts of class members
-trainlab_ct <- Train_denial %>%
-  group_by(outcome) %>% 
-  count()
-## Proportions of training class members
-train_data <- tibble(outcome= c("0","1"),
-       Train_Data_Prop= as.vector(round(prop.table(trainlab_ct$n),2))) %>%
-  mutate(outcome= as.integer(outcome))
-trainlab_ct %>% full_join(train_data, by= "outcome")
-## Store baseline accuracy object
-train_base_acc <- as.numeric(train_data %>% filter(outcome== "1") %>% select(Train_Data_Prop))
-
-# Test data----------------------------------------------------------------------------------------------------------------------------------------------------------------------
-## Counts of class members
-testlab_ct <- Test_denial %>%
-  group_by(outcome) %>% 
-  count()
-## Proportions of test class members
-test_data <- tibble(outcome= c("0","1"),
-       Test_Data_Prop= as.vector(round(prop.table(testlab_ct$n),2))) %>%
-  mutate(outcome= as.integer(outcome))
-testlab_ct %>% full_join(test_data, by= "outcome")
-## Store baseline accuracy object
-test_base_acc <- as.numeric(test_data %>% filter(outcome== "1") %>% select(Test_Data_Prop))
-
-
 # Feature Engineering-------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 ## Clinical Concept Creation for Clinical Feature Search
@@ -181,36 +148,6 @@ Test_denial1 <- Test_denial %>%
 Train_denial1$outcome <- factor(Train_denial1$outcome, levels = c("1","0"))
 Test_denial1$outcome <- factor(Test_denial1$outcome, levels = c("1","0"))
 
-# Model Descriptions-------------------------------------------------------------------------------------------------------------------------------------------------
-
-## Lasso Logistic regression with regularization
-Logistic regression is a technique that uses a sigmoid function to predict a binary outcome.
-Regularization is a technique that penalizes the model during training if it  captures too much noise
-Lasso regularization drops variables that don't add much to the model.
-
-## Ridge Logistic regression with regularization
-Ridge regression  also penalizes the model during training if the algorithm captures too much noise.
-In contrast to lasso regression, ridge regression retains all variables.
-
-## ElasticNet Logistic regression with regularization
-ElasticNet regression attempts to find the optimal combination of lasso regression and ridge regression.
-
-## Boosted Decision Tree Model
-A decision tree (DT) has a structure similar to a branching tree.
-A question is asked at a *node* of the tree, and the answer determines which branch one follows.
-The nodes represent the features of the dataset, and the branches represent the algorithm decision rules.
-Terminal nodes or "*leaf nodes*" contain the model output.
-DT model performance will be improved through a process called **boosting** where some parts of the algorithm learn from mistakes made by other parts.
-
-## Support Vector Machine Model
-The Support Vector Model  finds an optimal linear hyperplane that separates the classes.
-A hyperplane is a surface that has one less dimension than there are variables in the data set.
-This approach is one of the most computationally intensive.
-
-## MLP Neural Network
-A multilayer perceptron (MLP) is a type of neural network composed of multiple layers of "neurons" that are all interconnected.
-Each neuron receives inputs from the previous layer and generates an output to the following layer.
-These algorithms are computationally intensive and are prone to overfitting.
 
 # Model training-------------------------------------------------------------------------------------------------------------------------------------------------------------------
 The tidmodels recipe package was utilized to train all models.  Any existing hyperparameters were tuned as part of each model's tidymodels workflow.
